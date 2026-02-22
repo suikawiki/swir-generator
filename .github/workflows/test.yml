@@ -104,7 +104,7 @@
                   "DOCKER_USER" : "${{ secrets.DOCKER_USER }}",
                   "SWIR_DOCKER_IMAGE" : "${{ secrets.SWIR_DOCKER_IMAGE }}"
                },
-               "if" : "${{ github.ref == 'refs/heads/foo1' }}",
+               "if" : "${{ github.ref == 'refs/heads/master' }}",
                "run" : "make swir-batch DOCKER_IMAGE=$SWIR_DOCKER_IMAGE"
             },
             {
@@ -126,7 +126,7 @@
       },
       "schedule" : [
          {
-            "cron" : "18 22,6,14 * * *"
+            "cron" : "20 22,6,14 * * *"
          }
       ]
    }
