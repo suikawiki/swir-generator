@@ -1,0 +1,19 @@
+{
+    "github": {
+      "build": [
+        {"run": "make swir-batch DOCKER_IMAGE=$SWIR_DOCKER_IMAGE",
+         "secrets": ["SWIR_DOCKER_IMAGE",
+                     "DOCKER_USER", "DOCKER_PASS", "BWALLER_URL"],
+         "branch": "foo1"}
+      ],
+      "tests": [
+        "make test"
+      ],
+      "pages": {
+        "build_secrets": ["SWIR_DOCKER_IMAGE"]
+      },
+      "gaa": true,
+      "autobuild": {"per_day": 3},
+      "merger": true
+    }
+  }
