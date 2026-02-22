@@ -9,9 +9,6 @@
       "tests": [
         "make test"
       ],
-      "pages": {
-        "build_secrets": ["SWIR_DOCKER_IMAGE"]
-      },
       "gaa": true,
       "autobuild": {"per_day": 3},
       "merger": true
