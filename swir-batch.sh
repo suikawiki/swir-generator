@@ -72,7 +72,17 @@ find local/indexes -type f -exec sha256sum {} + | sort -k 2 > local/.pre_run_ind
 
 echo "Building and running the main script..."
 docker build -t ${JS_RUNNER_IMAGE} -f js/Dockerfile.runner js/ > /dev/null
-docker run --rm -v "$(pwd)/local:/app/local" ${JS_RUNNER_IMAGE} ${MIRROR_SET}
+
+## --- Debug Mode Configuration ---
+## Check if this is a GitHub Actions retry. If so, enable debug mode.
+DEBUG_FLAG="false"
+if [ -n "$GITHUB_RUN_ATTEMPT" ] && [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+  echo "--> GitHub Actions retry detected. Enabling debug mode."
+  DEBUG_FLAG="true"
+fi
+
+## Run the main script in a container, passing the debug flag.
+docker run --rm -e DEBUG=${DEBUG_FLAG} -v "$(pwd)/local:/app/local" ${JS_RUNNER_IMAGE} ${MIRROR_SET}
 
 echo "Authenticating with Docker registry..."
 if [ -n "$DOCKER_USER" ] && [ -n "$DOCKER_PASS" ]; then

@@ -7,6 +7,7 @@ import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
 const IMPLEMENTATION_VERSION = 1;
+const isDebug = process.env.DEBUG === 'true';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const isLive = process.env.LIVE;
@@ -159,7 +160,7 @@ async function processSingleItem (id, item) {
   }
 } // processSingleItem
 
-async function processMirrorSet (mirrorSet) {
+async function processMirrorSet (mirrorSet, incomingItems) {
   console.error (`--> Processing mirror set ${mirrorSet}...`);
   const startTime = Date.now();
 
@@ -169,7 +170,7 @@ async function processMirrorSet (mirrorSet) {
     const indexFiles = fs.readdirSync(indexesDir).filter(f => f.startsWith('list-') && f.endsWith('.txt')).sort();
     for (const file of indexFiles) {
       const filePath = path.join (indexesDir, file);
-      const lines = fs.readFileSync (filePath, 'utf8').split ('\n').filter (Boolean);
+      const lines = fs.readFileSync (filePath, 'utf8').split('\n').filter (Boolean);
       for (const line of lines) {
         const [id, versionStr] = line.split('\t');
         const version = versionStr ? parseInt(versionStr, 10) : 0; // Default to version 0 for old format
@@ -203,7 +204,6 @@ async function processMirrorSet (mirrorSet) {
   }
 
   const currentIndexFile = path.join (indexesDir, `list-${mirrorSet}.txt`);
-  const incomingItems = await fetchIdentifierItems ();
 
   let itemsWereProcessed = false;
   let consecutiveErrors = 0;
@@ -212,6 +212,8 @@ async function processMirrorSet (mirrorSet) {
   let lastProgressTime = Date.now();
   let itemsToProcess = Object.entries(incomingItems);
   let currentIndex = 0;
+  
+  const processedInThisRun = new Set();
 
   while (currentIndex < itemsToProcess.length) {
     const [id, item] = itemsToProcess[currentIndex];
@@ -224,12 +226,21 @@ async function processMirrorSet (mirrorSet) {
 
     const existingVersion = existingObjectsVersions.get(id) || 0;
     if (existingVersion >= IMPLEMENTATION_VERSION) {
+      if (isDebug) {
+        console.log(`DEBUG: [${id}] Skipping. Existing version (${existingVersion}) is up-to-date with current version (${IMPLEMENTATION_VERSION}).`);
+      }
       currentIndex++;
       continue; // Already processed with current or newer version
     }
 
     if (existingVersion > 0) {
-        console.error(`--> Regenerating ${id} due to version mismatch (existing: ${existingVersion}, current: ${IMPLEMENTATION_VERSION}).`);
+        if (isDebug) {
+            console.log(`DEBUG: [${id}] Processing. Regenerating due to version mismatch (existing: ${existingVersion}, current: ${IMPLEMENTATION_VERSION}).`);
+        }
+    } else {
+        if (isDebug) {
+            console.log(`DEBUG: [${id}] Processing. New item.`);
+        }
     }
 
     const result = await processSingleItem (id, item);
@@ -255,11 +266,17 @@ async function processMirrorSet (mirrorSet) {
     consecutive429Errors = 0;
 
     if (!result) { // Skipped intentionally
+      if (isDebug) {
+        console.log(`DEBUG: [${id}] Skipped intentionally by processSingleItem.`);
+      }
       currentIndex++;
       continue;
     }
 
     if (result.failed) {
+      if (isDebug) {
+        console.log(`DEBUG: [${id}] Failed to process.`);
+      }
       missingIdentifiers.add(id);
       consecutiveErrors++;
       if (consecutiveErrors >= BatchConfig.errorThreshold) {
@@ -278,7 +295,7 @@ async function processMirrorSet (mirrorSet) {
     itemsWereProcessed = true;
 
     // Record the successful processing with the new version
-    fs.appendFileSync (currentIndexFile, `${id}\t${IMPLEMENTATION_VERSION}\n`, 'utf8');
+    processedInThisRun.add(id);
     existingObjectsVersions.set(id, IMPLEMENTATION_VERSION); // Update in-memory map as well
     
     missingIdentifiers.delete(id);
@@ -294,7 +311,31 @@ async function processMirrorSet (mirrorSet) {
 
   fs.writeFileSync(missingFile, Array.from(missingIdentifiers).join('\n'), 'utf8');
 
-  if (!itemsWereProcessed) {
+  if (itemsWereProcessed) {
+    console.error('--> Writing updated index file...');
+    const currentSetItems = new Map();
+    // Read the old file if it exists
+    if (fs.existsSync(currentIndexFile)) {
+      const lines = fs.readFileSync(currentIndexFile, 'utf8').split('\n').filter(Boolean);
+      for (const line of lines) {
+        const [id, versionStr] = line.split('\t');
+        const version = versionStr ? parseInt(versionStr, 10) : 0;
+        if (id) {
+          currentSetItems.set(id, version);
+        }
+      }
+    }
+    // Add/update items processed in this run
+    for (const id of processedInThisRun) {
+      currentSetItems.set(id, IMPLEMENTATION_VERSION);
+    }
+    // Write the new, clean index file
+    const newIndexContent = [...currentSetItems.entries()]
+      .map(([id, version]) => `${id}\t${version}`)
+      .join('\n');
+    fs.writeFileSync(currentIndexFile, newIndexContent + '\n', 'utf8');
+    console.error('--> Index file updated.');
+  } else {
     console.error ('--> No new or outdated items were processed.');
   }
 
@@ -307,7 +348,35 @@ async function processMirrorSet (mirrorSet) {
     fs.writeFileSync (path.join (indexesDir, 'set.txt'), String (nextMirrorSet), 'utf8');
     console.error (`-> Set next mirror set to: ${nextMirrorSet}`);
   } // if size limit exceeded
+
+  return existingObjectsVersions;
 } // processMirrorSet
+
+async function generateLicensesFile(allItems, processedItemIds) {
+  console.error('--> Generating licenses file...');
+  const licenses = new Set();
+
+  for (const id of processedItemIds) {
+    const item = allItems[id];
+    if (item && item.image_source) {
+      const legalInfo = Object.entries(item.image_source)
+        .filter(([key]) => key.startsWith('legal'))
+        .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+        .map(([key, value]) => `${key}: ${value}`)
+        .join('\n');
+      
+      if (legalInfo) {
+        licenses.add(legalInfo);
+      }
+    }
+  }
+
+  const sortedLicenses = Array.from(licenses).sort();
+  const licensesContent = sortedLicenses.join('\n\n');
+  const licensesFile = path.join(indexesDir, 'licenses.txt');
+  fs.writeFileSync(licensesFile, licensesContent, 'utf8');
+  console.error(`--> Licenses file generated at ${licensesFile} with ${sortedLicenses.length} entries.`);
+} // generateLicensesFile
 
 async function main () {
   const mirrorSet = process.argv[2];
@@ -319,7 +388,9 @@ async function main () {
   try {
     fs.mkdirSync (indexesDir, { recursive: true });
     fs.mkdirSync (objectsDir, { recursive: true });
-    await processMirrorSet (mirrorSet);
+    const allItems = await fetchIdentifierItems ();
+    const processedItems = await processMirrorSet (mirrorSet, allItems);
+    await generateLicensesFile(allItems, processedItems.keys());
     console.error (`-> Batch process for mirror set ${mirrorSet} completed successfully.`);
   } catch (error) {
     console.error (`FATAL: ${error.message}`);

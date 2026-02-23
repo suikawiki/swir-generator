@@ -38,6 +38,7 @@ ciconfig:
 ##   DOCKER_PASS:  Password for Docker registry. (Optional)
 ##   BWALLER_URL:  URL for bwaller notification. (Optional)
 ##
+## Invoked by config/ci.json 
 swir-batch: deps swir-batch.sh
 	@echo "--- Handing off to swir-batch.sh script ---"
 	@bash swir-batch.sh \
