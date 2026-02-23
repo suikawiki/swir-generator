@@ -216,3 +216,142 @@ PQ.Image.prototype.getClippedCanvasByRegionBoundary = function (rb) {
 
   return destCtx;
 }; // PQ.Image.prototype.getClippedCanvasByRegionBoundary
+
+
+PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png" } = {}) {
+
+  const sharp = (await import('sharp')).default;
+
+  const inputBuffer = canvas.toBuffer (type);
+
+  const xmpParts = [];
+  const dlTagNames = [];
+
+  const SPDX_TO_URL = {
+    "CC-PDM-1.0": "https://creativecommons.org/publicdomain/mark/1.0/deed.ja",
+    "CC-BY-SA-4.0": "https://creativecommons.org/licenses/by-sa/4.0/deed.ja",
+    "CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/deed.ja",
+  };
+
+  const escapeXml = (str) => {
+    if (typeof str !== 'string') return '';
+    return str.replace (/[<>&'"]/g, (c) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case "'": return '&apos;';
+        case '"': return '&quot;';
+      }
+    });
+  }; // escapeXml
+  
+  info = info || {};
+  const langAttr = info.legalLang != null ? ` xml:lang="${escapeXml (info.legalLang)}"` : '';
+
+  if (info.legalKey) {
+    const url = SPDX_TO_URL[info.legalKey];
+    if (url) {
+      xmpParts.push (`<cc:license rdf:resource="${escapeXml (url)}"/>`);
+    }
+    xmpParts.push (`<dl:key>${escapeXml (info.legalKey)}</dl:key>`);
+    dlTagNames.push ('dl:key');
+  }
+
+  if (info.legalTitle) {
+    xmpParts.push (`<dl:title${langAttr}>${escapeXml (info.legalTitle)}</dl:title>`);
+    dlTagNames.push ('dl:title');
+  }
+
+  if (info.legalHolder) {
+    const holder = escapeXml (info.legalHolder);
+    xmpParts.push (`<xmpRights:Owner>`);
+    xmpParts.push (`<rdf:Seq>`);
+    xmpParts.push (`<rdf:li${langAttr}>${holder}</rdf:li>`);
+    xmpParts.push (`</rdf:Seq>`);
+    xmpParts.push (`</xmpRights:Owner>`);
+    xmpParts.push (`<dl:holder${langAttr}>${holder}</dl:holder>`);
+    dlTagNames.push ('dl:holder');
+  }
+
+  if (info.legalDate) {
+    xmpParts.push (`<dl:date${langAttr}>${escapeXml (info.legalDate)}</dl:date>`);
+    dlTagNames.push ('dl:date');
+  }
+
+  if (info.legalOriginalURL) {
+    xmpParts.push (`<dl:url rdf:resource="${escapeXml (info.legalOriginalURL)}"/>`);
+    dlTagNames.push ('dl:url');
+  }
+
+  if (info.legalCredit) {
+    xmpParts.push (`<dl:credit${langAttr}>${escapeXml (info.legalCredit)}</dl:credit>`);
+    dlTagNames.push ('dl:credit');
+  }
+
+  if (info.legalLang != null) {
+    xmpParts.push (`<dl:lang rdf:datatype="data:,ddsd.lang">${escapeXml (info.legalLang)}</dl:lang>`);
+    dlTagNames.push ('dl:lang');
+  }
+  if (info.legalDir) {
+    xmpParts.push (`<dl:dir rdf:datatype="data:,ddsd.dir">${escapeXml (info.legalDir)}</dl:dir>`);
+    dlTagNames.push ('dl:dir');
+  }
+  if (info.legalWritingMode) {
+    xmpParts.push (`<dl:writingMode rdf:datatype="data:,ddsd.writingMode">${escapeXml (info.legalWritingMode)}</dl:writingMode>`);
+    dlTagNames.push ('dl:writingMode');
+  }
+
+  if (dlTagNames.length > 0) {
+    const dlTagsString = dlTagNames.join (', ') + ' を参照。';
+    xmpParts.push (`<dc:rights>`);
+    xmpParts.push (`<rdf:Alt>`);
+    xmpParts.push (`<rdf:li xml:lang="ja">${dlTagsString}</rdf:li>`);
+    xmpParts.push (`</rdf:Alt>`);
+    xmpParts.push (`</dc:rights>`);
+  }
+
+  if (xmpParts.length === 0) {
+    return inputBuffer;
+  }
+
+  const xmp = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>` +
+`<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:cc="http://creativecommons.org/ns#" xmlns:dl="data:,ddsd.legal." xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/">` +
+  `<rdf:RDF>` +
+    `<rdf:Description rdf:about="">` +
+`${xmpParts.join ('')}` +
+    `</rdf:Description>` +
+  `</rdf:RDF>` +
+`</x:xmpmeta>` +
+`<?xpacket end="w"?>`;
+
+  const xmpBuffer = Buffer.from(xmp, 'utf-8');
+
+  const outputBuffer = await sharp (inputBuffer)
+    .withMetadata ({ xmp: xmpBuffer })
+    .toFormat (type === "image/jpeg" ? "jpeg" : "png")
+    .toBuffer ();
+
+  return (outputBuffer);
+}; // PQ.Image.SerializeCanvas
+
+
+/*
+
+Copyright 2026 Wakaba <wakaba@suikawiki.org>.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public
+License along with this program.  If not, see
+<https://www.gnu.org/licenses/>.
+
+*/

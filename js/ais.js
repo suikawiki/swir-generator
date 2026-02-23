@@ -29,6 +29,7 @@ import { PQ } from './pq.js';
         // imageHeight : positive integer?
         orientation: 1,
         // pageNumber : positive integer?
+        // legal*
       };
       let imageAccess = {
         // useOGImage : boolean
@@ -54,9 +55,10 @@ import { PQ } from './pq.js';
         input.text = ':ep-x' + input.image_source.transformKey + '-' + input.image_source.key;
         imageRegion.regionKey = input.image_region?.region_key;
         imageRegion.regionBoundary ??= input.image_region?.region_boundary;
-        ['imageURL', 'imageWidth', 'imageHeight'].forEach (_ => {
+        Object.keys (input.image_source).forEach (_ => {
           if (input.image_source[_]) imageSource[_] = input.image_source[_];
-        });
+         });
+        imageAccess = input.imageAccess || {};
       }
 
       let inputURL = {};
@@ -96,7 +98,9 @@ import { PQ } from './pq.js';
             imageSource.key = `ndl-${x}-${y}`;
             imageSource.imageURL = `https://dl.ndl.go.jp/api/iiif/${x}/R${yy}/full/full/0/default.jpg`;
             imageSource.pageURL = "https://dl.ndl.go.jp/pid/"+x+"/1/"+y;
+            imageSource.iiifURL = "https://dl.ndl.go.jp/api/iiif/"+x+"/manifest.json";
             imageRegion.regionKey ??= m[3]; // or undefined
+            imageAccess.hasLegal = "ndl";
           }
           break;
         } else if (inputURL.hostname === 'dl.ndl.go.jp') {
@@ -109,6 +113,8 @@ import { PQ } from './pq.js';
             imageSource.key = `ndl-${x}-${y}`;
             imageSource.imageURL = `https://dl.ndl.go.jp/api/iiif/${x}/R${yy}/full/full/0/default.jpg`;
             imageSource.pageURL = "https://dl.ndl.go.jp/pid/"+x+"/1/"+y;
+            imageSource.iiifURL = "https://dl.ndl.go.jp/api/iiif/"+x+"/manifest.json";
+            imageAccess.hasLegal = "ndl";
           } else if (p[1] === 'info:ndljp') {
             // https://dl.ndl.go.jp/info:ndljp/pid/2566606/2
             let x = p[3];
@@ -117,6 +123,8 @@ import { PQ } from './pq.js';
             imageSource.key = `ndl-${x}-${y}`;
             imageSource.imageURL = `https://dl.ndl.go.jp/api/iiif/${x}/R${yy}/full/full/0/default.jpg`;
             imageSource.pageURL = "https://dl.ndl.go.jp/pid/"+x+"/1/"+y;
+            imageSource.iiifURL = "https://dl.ndl.go.jp/api/iiif/"+x+"/manifest.json";
+            imageAccess.hasLegal = "ndl";
           }
           break;
         }
@@ -157,6 +165,7 @@ import { PQ } from './pq.js';
             imageSource.pageURL = `https://kokusho.nijl.ac.jp/biblio/${m[1]}/${imageAccess.pageNumber}`;
             imageSource.iiifURL = `https://kokusho.nijl.ac.jp/biblio/${m[1]}/manifest`;
             imageRegion.regionKey ??= m[3]; // or undefined
+            imageAccess.hasLegal = 'kokusho';
           }
           break;
         } else if (inputURL.hostname === 'kokusho.nijl.ac.jp') {
@@ -168,6 +177,7 @@ import { PQ } from './pq.js';
             imageSource.key = `kokusho-${m[1]}-${imageAccess.pageNumber}`;
             imageSource.pageURL = `https://kokusho.nijl.ac.jp/biblio/${m[1]}/${imageAccess.pageNumber}`;
             imageSource.iiifURL = `https://kokusho.nijl.ac.jp/biblio/${m[1]}/manifest`;
+            imageAccess.hasLegal = 'kokusho';
           }
           break;
         }
@@ -322,7 +332,7 @@ import { PQ } from './pq.js';
       };
     } // parseImageInput
 
-    async getImageByImageAccess ({imageSource, imageAccess}, opts = {}) {
+    async resolveImageSource ({imageSource, imageAccess}) {
       if (imageAccess.useOGImage &&
           !(imageAccess.imageURL || imageSource.imageURL)) {
         let fURL = this.config.image_proxy_url_prefix + imageSource.pageURL;
@@ -340,48 +350,6 @@ import { PQ } from './pq.js';
           }
         });
       } // useOGImage
-
-      if ((imageAccess.iiifURL || imageSource.iiifURL) &&
-          !(imageAccess.imageURL || imageSource.imageURL)) {
-        let fURL = this.config.image_proxy_url_prefix + (imageAccess.iiifURL || imageSource.iiifURL);
-        let json = await fetch (fURL, {mode: 'cors'}).then (res => {
-          if (res.status !== 200) throw res;
-          return res.json ();
-        });
-
-        function getBestImage (items) {
-          if (!items?.length) return null;
-          let bestImage = items[0];
-          let maxPixels = 0;
-          items.forEach (image => {
-            const res = image.resource || image.body;
-            if (res && res.width && res.height) {
-              const pixels = res.width * res.height;
-              if (pixels > maxPixels) {
-                maxPixels = pixels;
-                bestImage = image;
-              }
-            }
-          });
-          return bestImage;
-        } // getBestImage
-        if (json.sequences) {
-          let canvas = json.sequences[0].canvases[imageAccess.pageNumber-1];
-          if (!canvas) throw new Error ("Bad page number |"+imageAccess.pageNumber+"|");
-
-          // .images , .rendering
-          let image = getBestImage (canvas.images);
-          imageSource.imageURL = image?.resource['@id'];
-          if (imageSource.imageURL) this.checkInternalURL (imageSource.imageURL);
-        } else if (json.items) {
-          let item = json.items[imageAccess.pageNumber-1];
-          if (!item) throw new Error ("Bad page number |"+imageAccess.pageNumber+"|");
-
-          let image = getBestImage (item.items[0].items);
-          imageSource.imageURL = image?.body.id;
-          if (imageSource.imageURL) this.checkInternalURL (imageSource.imageURL);
-        }
-      } // iiifURL
 
       if (imageAccess.needTypeCheck &&
           !(imageAccess.imageURL || imageSource.imageURL)) {
@@ -407,7 +375,151 @@ import { PQ } from './pq.js';
           }
         });
       } // needTypeCheck
+    } // resolveImageSource
 
+    async getImageByImageAccess ({imageSource, imageAccess}, opts = {}) {
+      let iiifJSON;
+      if ((imageAccess.iiifURL || imageSource.iiifURL) &&
+          !(imageAccess.imageURL || imageSource.imageURL)) {
+        let fURL = this.config.image_proxy_url_prefix + (imageAccess.iiifURL || imageSource.iiifURL);
+        iiifJSON = await fetch (fURL, {mode: 'cors'}).then (res => {
+          if (res.status !== 200) throw res;
+          return res.json ();
+        });
+
+        function getBestImage (items) {
+          if (!items?.length) return null;
+          let bestImage = items[0];
+          let maxPixels = 0;
+          items.forEach (image => {
+            const res = image.resource || image.body;
+            if (res && res.width && res.height) {
+              const pixels = res.width * res.height;
+              if (pixels > maxPixels) {
+                maxPixels = pixels;
+                bestImage = image;
+              }
+            }
+          });
+          return bestImage;
+        } // getBestImage
+        if (iiifJSON.sequences) {
+          let canvas = iiifJSON.sequences[0].canvases[imageAccess.pageNumber-1];
+          if (!canvas) throw new Error ("Bad page number |"+imageAccess.pageNumber+"|");
+
+          // .images , .rendering
+          let image = getBestImage (canvas.images);
+          imageSource.imageURL = image?.resource['@id'];
+          if (imageSource.imageURL) this.checkInternalURL (imageSource.imageURL);
+        } else if (iiifJSON.items) {
+          let item = iiifJSON.items[imageAccess.pageNumber-1];
+          if (!item) throw new Error ("Bad page number |"+imageAccess.pageNumber+"|");
+
+          let image = getBestImage (item.items[0].items);
+          imageSource.imageURL = image?.body.id;
+          if (imageSource.imageURL) this.checkInternalURL (imageSource.imageURL);
+        }
+      } else if ((imageAccess.iiifURL || imageSource.iiifURL) &&
+                 !imageSource.legalKey) {
+        let fURL = this.config.image_proxy_url_prefix + (imageAccess.iiifURL || imageSource.iiifURL);
+        try {
+          iiifJSON = await fetch (fURL, {mode: 'cors'}).then (res => {
+            if (res.status !== 200) throw res;
+            return res.json ();
+          });
+        } catch (e) { }
+      }
+      if (iiifJSON && !imageSource.legalKey) {
+        let iiifValue = value => [
+          typeof value === "string" ? value : value?.ja?.[0] || Object.values(value ?? {})[0]?.[0],
+          typeof value === "string" ? undefined : value?.ja?.[0] ? 'ja' : Object.keys (value ?? {})[0],
+        ];
+        let lang;
+        let dir;
+        let writingMode;
+        let meta = {};
+        for (let {label, value} of iiifJSON.metadata || []) {
+          label = iiifValue (label);
+          value = iiifValue (value);
+          meta[label[0]] = value[0];
+          lang ||= label[1] || value[1];
+        }
+
+        let credits = [];
+        {
+          let title = meta.Title // NDL
+              || iiifValue (iiifJSON.label); // kulib
+          let author = meta.Author || // kokusho
+              meta.Creator || meta.Publisher; // NDL
+          if (!author) {
+            let m = meta["タイトル / 著者"]?.match (/^<a[^<>]+>.+? \/ ([^<>&]+)<\/a>$/);
+            if (m) author = m[1]; // kulib
+          }
+          let date2 = meta["Publication Date (W3CDTF format)"]; // NDL
+          let date1 = meta["Publication Date"] // NDL
+          if (!date1 && meta.Date) {
+            if (imageAccess.hasLegal === 'kokusho') {
+              let m = meta.Date.match (/^(.+) (\S*)$/);
+              if (m) {
+                author ||= m[1];
+                if (m[2]) date1 = m[2];
+              }
+            } else {
+              date1 ||= meta.Date;
+            }
+          }
+          date1 ||= date2 || "";
+          if (date1 !== date2 && date2) date1 += " ("+date2+")";
+          lang ||= {
+            kokusho: 'ja',
+            ndl: 'ja',
+          }[imageAccess.hasLegal];
+          let url = meta.URL || // NDL
+              imageSource.pageURL || imageSource.imageURL || imageSource.iiifURL;
+          imageSource.legalTitle = title;
+          imageSource.legalHolder = author;
+          imageSource.legalDate = date1;
+          imageSource.legalOriginalURL = url;
+          imageSource.legalLang = (lang || '').toLowerCase ();
+          imageSource.legalDir = dir || 'ltr';
+          imageSource.legalWritingMode = writingMode || 'horizonatl-tb';
+        }
+        if (iiifJSON.attribution) {
+          if (imageAccess.hasLegal === 'kokusho' ||
+              imageAccess.hasLegal === 'ndl') {
+            credits.push ('所蔵: ' + iiifJSON.attribution + "。");
+          } else {
+            credits.push (iiifJSON.attribution);
+          }
+        }
+        let legalKey = {
+          "https://creativecommons.org/publicdomain/mark/1.0/deed.ja": "CC-PDM-1.0", // kokusho
+          "https://creativecommons.org/licenses/by-sa/4.0/deed.ja": "CC-BY-SA-4.0", // kokusho
+          "https://creativecommons.org/licenses/by/4.0/deed.ja": "CC-BY-4.0",
+          //"https://creativecommons.org/licenses/by-nd/4.0/deed.ja": (non-free) // kokusho
+          //"https://kokusho.nijl.ac.jp/page/usage.html" : All-Rights-Reserved (non-free) // kokusho
+        }[iiifJSON.license];
+        if (legalKey) {
+          imageSource.legalKey = legalKey;
+        } else if (iiifJSON.rights === "https://rmda.kulib.kyoto-u.ac.jp/license_icon/free-license" &&
+            iiifJSON.requiredStatement?.label?.ja?.[0] === "所蔵") {
+          let value = iiifJSON.requiredStatement?.value?.ja?.[0] || '';
+          if (value.match (/^京都大学(附属図書館|吉田南総合図書館|法学部図書室|経済学研究科|経済学部図書室|理学部中央図書室|総合博物館)/)) {
+            imageSource.legalKey = '-ddsd-kulib-free-normal';
+            credits.push (iiifJSON.requiredStatement?.label?.ja?.[0] + ': ' + value + ' <' + iiifJSON.rights + '>.');
+          }
+        } else if (imageAccess.hasLegal === 'ndl' &&
+                   meta["Access Restrictions"] === "PDM") {
+          imageSource.legalKey = '-ddsd-ndl-' + meta["Access Restrictions"];
+        } else {
+          if (meta["Access Restrictions"]) { // unknown value
+            credits.push (meta["Access Restrictions"]); // NDL
+          }
+          imageSource.legalKey = '-ddsd-unknown';
+        }
+        imageSource.legalCredit = credits.join ("\n");
+      } // iiifURL
+      
       let fURL = (imageAccess.imageURL || imageSource.imageURL) + '';
       if (!imageAccess.isInternal) {
         fURL = this.config.image_proxy_url_prefix + fURL;
@@ -515,7 +627,7 @@ export class ClassicAnnotationStorage {
     function objectToJSON (value, indent = 2) {
       const space = " ".repeat (indent);
       function format (val, depth) {
-        if (val === null) return "null";
+        if (val == null) return "null";
 
         if (typeof val !== "object") {
           return JSON.stringify (val);

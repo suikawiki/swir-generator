@@ -6,6 +6,8 @@ import { createCanvas, loadImage } from "canvas";
 import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
+const IMPLEMENTATION_VERSION = 1;
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const isLive = process.env.LIVE;
 
@@ -15,9 +17,9 @@ const BatchConfig = {
   progressIntervalMs: 15 * 1000, // 15 seconds
   errorThreshold: 10,
   sizeLimitBytes: isLive ? 1 * 1024 * 1024 * 1024 : 100 * 1024 * 1024,
-  // Rate limiting (429) handling
-  consecutive429Threshold: 5,
-  sleepMsOn429: 1500, // 1.5 seconds
+  consecutive429Threshold: 10, // Increased threshold
+  initialSleepMsOn429: 2000, // Start with 2 seconds
+  maxSleepMsOn429: 30000, // Cap at 30 seconds
 };
 
 let Config = {
@@ -34,12 +36,8 @@ PQ.env.createImg = async url => {
   if (res.status !== 200) throw res;
   let buffer = Buffer.from (await res.arrayBuffer ());
   let img = await loadImage (buffer);
-  //img.naturalWidth = img.width;
-  //img.naturalHeight = img.height;
   return img;
 };
-
-
 
 const __filename = fileURLToPath (import.meta.url);
 const __dirname = path.dirname (__filename);
@@ -150,7 +148,7 @@ async function processSingleItem (id, item) {
   
   try {
     const image = await dataSource.getClippedImageCanvas (parsed, { useCache: true });
-    const buffer = image.toBuffer ('image/jpeg');
+    const buffer = await PQ.Image.SerializeCanvas(image, parsed.imageSource, { type: 'image/jpeg' });
     const objectFile = getObjectPath (id);
     return { buffer, objectFile };
   } catch (e) {
@@ -165,24 +163,28 @@ async function processMirrorSet (mirrorSet) {
   console.error (`--> Processing mirror set ${mirrorSet}...`);
   const startTime = Date.now();
 
-  const existingObjects = new Set ();
-  console.error ('--> Reading all existing index files to build a comprehensive list of objects...');
+  const existingObjectsVersions = new Map();
+  console.error ('--> Reading all existing index files to build a comprehensive list of objects and their versions...');
   try {
-    const indexFiles = fs.readdirSync (indexesDir).filter (f => f.startsWith ('list-') && f.endsWith ('.txt'));
+    const indexFiles = fs.readdirSync(indexesDir).filter(f => f.startsWith('list-') && f.endsWith('.txt')).sort();
     for (const file of indexFiles) {
       const filePath = path.join (indexesDir, file);
       const lines = fs.readFileSync (filePath, 'utf8').split ('\n').filter (Boolean);
       for (const line of lines) {
-        existingObjects.add (line);
+        const [id, versionStr] = line.split('\t');
+        const version = versionStr ? parseInt(versionStr, 10) : 0; // Default to version 0 for old format
+        if (id) {
+          existingObjectsVersions.set(id, version);
+        }
       }
     }
-    console.error (`--> Found ${existingObjects.size} existing objects from ${indexFiles.length} index file(s).`);
+    console.error (`--> Found ${existingObjectsVersions.size} existing objects from ${indexFiles.length} index file(s).`);
   } catch (e) {
     if (e.code !== 'ENOENT') {
       console.error (`--> Error reading index directory: ${e.message}`);
     } else {
       console.error ('--> No index directory found. Starting fresh.');
-    } // no ENOENT
+    }
   }
 
   const missingIdentifiers = new Set();
@@ -203,40 +205,57 @@ async function processMirrorSet (mirrorSet) {
   const currentIndexFile = path.join (indexesDir, `list-${mirrorSet}.txt`);
   const incomingItems = await fetchIdentifierItems ();
 
-  let newItemsAdded = false;
+  let itemsWereProcessed = false;
   let consecutiveErrors = 0;
   let consecutive429Errors = 0;
   let processedCount = 0;
   let lastProgressTime = Date.now();
+  let itemsToProcess = Object.entries(incomingItems);
+  let currentIndex = 0;
 
-  for (const [id, item] of Object.entries (incomingItems)) {
+  while (currentIndex < itemsToProcess.length) {
+    const [id, item] = itemsToProcess[currentIndex];
     processedCount++;
+
     if (Date.now() - startTime > BatchConfig.timeoutMs) {
       console.error(`--> Time limit of ${BatchConfig.timeoutMs / 1000 / 60} minutes exceeded. Stopping current batch.`);
       break;
     }
 
-    if (existingObjects.has (id)) {
-      continue;
-    } // if existing
+    const existingVersion = existingObjectsVersions.get(id) || 0;
+    if (existingVersion >= IMPLEMENTATION_VERSION) {
+      currentIndex++;
+      continue; // Already processed with current or newer version
+    }
+
+    if (existingVersion > 0) {
+        console.error(`--> Regenerating ${id} due to version mismatch (existing: ${existingVersion}, current: ${IMPLEMENTATION_VERSION}).`);
+    }
 
     const result = await processSingleItem (id, item);
 
     if (result?.rateLimited) {
-      consecutiveErrors = 0; // Reset general error counter
+      consecutiveErrors = 0;
       consecutive429Errors++;
+      
       if (consecutive429Errors >= BatchConfig.consecutive429Threshold) {
         console.warn(`--> Aborting due to ${consecutive429Errors} consecutive 429 errors. This is considered a normal stop.`);
-        break; // Stop the batch normally
+        break;
       }
-      console.warn(`--> Sleeping for ${BatchConfig.sleepMsOn429}ms due to 429 error...`);
-      await sleep(BatchConfig.sleepMsOn429);
-      continue; // Ignore item and move to the next
+      
+      let sleepTime = BatchConfig.initialSleepMsOn429 * Math.pow(2, consecutive429Errors - 1);
+      sleepTime = Math.min(sleepTime, BatchConfig.maxSleepMsOn429);
+      sleepTime += Math.random() * 1000; // Jitter
+      
+      console.warn(`--> Sleeping for ${Math.round(sleepTime)}ms due to 429 error...`);
+      await sleep(sleepTime);
+      
+      continue; // Retry the same item
     }
-    consecutive429Errors = 0; // Reset 429 counter on any other result
+    consecutive429Errors = 0;
 
-    if (!result) { // Null result, item skipped intentionally
-      consecutiveErrors = 0;
+    if (!result) { // Skipped intentionally
+      currentIndex++;
       continue;
     }
 
@@ -248,32 +267,35 @@ async function processMirrorSet (mirrorSet) {
           fs.writeFileSync(missingFile, Array.from(missingIdentifiers).join('\n'), 'utf8');
           throw new Error(`Aborting due to ${consecutiveErrors} consecutive processing errors.`);
       }
+      currentIndex++;
       continue;
     }
     
-    consecutiveErrors = 0; // Reset general error counter on success
+    consecutiveErrors = 0;
 
     fs.mkdirSync (path.dirname (result.objectFile), { recursive: true });
     fs.writeFileSync (result.objectFile, result.buffer);
+    itemsWereProcessed = true;
 
-    fs.appendFileSync (currentIndexFile, `${id}\n`, 'utf8');
-    existingObjects.add (id);
+    // Record the successful processing with the new version
+    fs.appendFileSync (currentIndexFile, `${id}\t${IMPLEMENTATION_VERSION}\n`, 'utf8');
+    existingObjectsVersions.set(id, IMPLEMENTATION_VERSION); // Update in-memory map as well
+    
     missingIdentifiers.delete(id);
-    newItemsAdded = true;
+    currentIndex++;
 
     const now = Date.now();
     if (now - lastProgressTime > BatchConfig.progressIntervalMs) {
       const elapsedSeconds = Math.round((now - startTime) / 1000);
-      console.error(`--> Progress: ${processedCount} items checked in ${elapsedSeconds} seconds.`);
+      console.error(`--> Progress: ${processedCount} of ${itemsToProcess.length} items checked in ${elapsedSeconds} seconds.`);
       lastProgressTime = now;
     }
-  } // for [id, item]
+  } // while
 
   fs.writeFileSync(missingFile, Array.from(missingIdentifiers).join('\n'), 'utf8');
 
-  if (!newItemsAdded) {
-    console.error ('--> No new items to process.');
-    return;
+  if (!itemsWereProcessed) {
+    console.error ('--> No new or outdated items were processed.');
   }
 
   const totalSize = getDirectorySize (objectsDir);
