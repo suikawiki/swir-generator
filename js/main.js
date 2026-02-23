@@ -6,7 +6,7 @@ import { createCanvas, loadImage } from "canvas";
 import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
-const IMPLEMENTATION_VERSION = 4;
+const IMPLEMENTATION_VERSION = 5;
 const isDebug = process.env.DEBUG === 'true';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
