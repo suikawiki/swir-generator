@@ -6,7 +6,7 @@ import { createCanvas, loadImage } from "canvas";
 import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
-const IMPLEMENTATION_VERSION = 1;
+const IMPLEMENTATION_VERSION = 2;
 const isDebug = process.env.DEBUG === 'true';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -61,23 +61,16 @@ function getObjectPath (id) {
   return path.join (objectsDir, dir, filename);
 } // getObjectPath
 
-async function fetchIdentifierItems () {
-  console.error (`--> Fetching identifiers from ${BatchConfig.identifiersUrl}...`);
+async function fetchListData () {
+  console.error (`--> Fetching list data from ${BatchConfig.identifiersUrl}...`);
   const response = await fetch (BatchConfig.identifiersUrl);
   if (!response.ok) {
-    throw new Error (`Failed to fetch identifiers: ${response.statusText}`);
+    throw new Error (`Failed to fetch list data: ${response.statusText}`);
   }
   const json = await response.json ();
-  const refs = Object.values (json.groups).map (_ => _.region_refs).flat ();
-  const items = {};
-  for (const ref of refs) {
-    if (json.items[ref]) {
-      items[ref] = json.items[ref];
-    }
-  }
-  console.error (`--> Found ${Object.keys (items).length} identifiers.`);
-  return items;
-} // fetchIdentifierItems
+  console.error (`--> Found ${Object.keys(json.items).length} items and ${Object.keys(json.groups).length} groups.`);
+  return json;
+} // fetchListData
 
 function getDirectorySize (dirPath) {
   let totalSize = 0;
@@ -105,14 +98,14 @@ function getDirectorySize (dirPath) {
 
 async function processSingleItem (id, item) {
   if (!item.tags?.free) {
-    return null;
+    return { skipped: true, reason: 'Item not tagged as free.' };
   } // if not free
 
   let parsed = dataSource.parseImageInput (item);
   if (!parsed) {
     console.error (`--> Bad image input for ${id}. Skipping.`);
     console.error({item});
-    return null;
+    return { skipped: true, reason: 'Bad image input.' };
   } // if not parsed
 
   let json;
@@ -133,7 +126,7 @@ async function processSingleItem (id, item) {
   if (!annotationItem) {
     console.error (`--> Annotation item not found for ${id}. Skipping.`);
     console.error({item, parsed});
-    return null;
+    return { skipped: true, reason: 'Annotation item not found.' };
   }
 
   const originalParsed = parsed;
@@ -144,7 +137,7 @@ async function processSingleItem (id, item) {
   if (!parsed) {
     console.error (`--> Bad input after annotation for ${id}. Skipping.`);
     console.error({item, originalParsed, annotationItem });
-    return null;
+    return { skipped: true, reason: 'Bad input after annotation.' };
   }
   
   try {
@@ -194,30 +187,34 @@ async function processMirrorSet (mirrorSet, incomingItems) {
     for (const line of lines) {
       missingIdentifiers.add(line);
     }
-    console.error(`--> Found ${missingIdentifiers.size} missing identifiers.`);
+    console.error(`--> Found ${missingIdentifiers.size} items that failed in the previous run. Retrying them.`);
   } catch (e) {
     if (e.code !== 'ENOENT') {
       console.error(`--> Error reading missing identifiers file: ${e.message}`);
     } else {
-      console.error('--> No missing identifiers file found.');
+      console.error('--> No previously failed items file found.');
     }
   }
 
   const currentIndexFile = path.join (indexesDir, `list-${mirrorSet}.txt`);
 
-  let itemsWereProcessed = false;
   let consecutiveErrors = 0;
   let consecutive429Errors = 0;
-  let processedCount = 0;
   let lastProgressTime = Date.now();
-  let itemsToProcess = Object.entries(incomingItems);
+  const itemsToProcess = Object.entries(incomingItems);
   let currentIndex = 0;
   
   const processedInThisRun = new Set();
+  let newItemsProcessed = 0;
+  let itemsRegenerated = 0;
+  let itemsSkippedUpToDate = 0;
+  let itemsSkippedIntentional = 0;
+  let itemsFailed = 0;
+
+  console.error(`--> Checking ${itemsToProcess.length} total items...`);
 
   while (currentIndex < itemsToProcess.length) {
     const [id, item] = itemsToProcess[currentIndex];
-    processedCount++;
 
     if (Date.now() - startTime > BatchConfig.timeoutMs) {
       console.error(`--> Time limit of ${BatchConfig.timeoutMs / 1000 / 60} minutes exceeded. Stopping current batch.`);
@@ -229,6 +226,7 @@ async function processMirrorSet (mirrorSet, incomingItems) {
       if (isDebug) {
         console.log(`DEBUG: [${id}] Skipping. Existing version (${existingVersion}) is up-to-date with current version (${IMPLEMENTATION_VERSION}).`);
       }
+      itemsSkippedUpToDate++;
       currentIndex++;
       continue; // Already processed with current or newer version
     }
@@ -265,10 +263,11 @@ async function processMirrorSet (mirrorSet, incomingItems) {
     }
     consecutive429Errors = 0;
 
-    if (!result) { // Skipped intentionally
+    if (result.skipped) { // Skipped with a reason
       if (isDebug) {
-        console.log(`DEBUG: [${id}] Skipped intentionally by processSingleItem.`);
+        console.log(`DEBUG: [${id}] Skipped: ${result.reason}`);
       }
+      itemsSkippedIntentional++;
       currentIndex++;
       continue;
     }
@@ -278,6 +277,7 @@ async function processMirrorSet (mirrorSet, incomingItems) {
         console.log(`DEBUG: [${id}] Failed to process.`);
       }
       missingIdentifiers.add(id);
+      itemsFailed++;
       consecutiveErrors++;
       if (consecutiveErrors >= BatchConfig.errorThreshold) {
           console.error(`--> Aborting after ${consecutiveErrors} consecutive errors.`);
@@ -292,11 +292,15 @@ async function processMirrorSet (mirrorSet, incomingItems) {
 
     fs.mkdirSync (path.dirname (result.objectFile), { recursive: true });
     fs.writeFileSync (result.objectFile, result.buffer);
-    itemsWereProcessed = true;
 
-    // Record the successful processing with the new version
+    if (existingVersion > 0) {
+      itemsRegenerated++;
+    } else {
+      newItemsProcessed++;
+    }
+
     processedInThisRun.add(id);
-    existingObjectsVersions.set(id, IMPLEMENTATION_VERSION); // Update in-memory map as well
+    existingObjectsVersions.set(id, IMPLEMENTATION_VERSION);
     
     missingIdentifiers.delete(id);
     currentIndex++;
@@ -304,17 +308,16 @@ async function processMirrorSet (mirrorSet, incomingItems) {
     const now = Date.now();
     if (now - lastProgressTime > BatchConfig.progressIntervalMs) {
       const elapsedSeconds = Math.round((now - startTime) / 1000);
-      console.error(`--> Progress: ${processedCount} of ${itemsToProcess.length} items checked in ${elapsedSeconds} seconds.`);
+      console.error(`--> Progress: ${currentIndex} of ${itemsToProcess.length} items checked in ${elapsedSeconds} seconds.`);
       lastProgressTime = now;
     }
   } // while
 
   fs.writeFileSync(missingFile, Array.from(missingIdentifiers).join('\n'), 'utf8');
 
-  if (itemsWereProcessed) {
+  if (processedInThisRun.size > 0) {
     console.error('--> Writing updated index file...');
     const currentSetItems = new Map();
-    // Read the old file if it exists
     if (fs.existsSync(currentIndexFile)) {
       const lines = fs.readFileSync(currentIndexFile, 'utf8').split('\n').filter(Boolean);
       for (const line of lines) {
@@ -325,11 +328,9 @@ async function processMirrorSet (mirrorSet, incomingItems) {
         }
       }
     }
-    // Add/update items processed in this run
     for (const id of processedInThisRun) {
       currentSetItems.set(id, IMPLEMENTATION_VERSION);
     }
-    // Write the new, clean index file
     const newIndexContent = [...currentSetItems.entries()]
       .map(([id, version]) => `${id}\t${version}`)
       .join('\n');
@@ -347,7 +348,15 @@ async function processMirrorSet (mirrorSet, incomingItems) {
     const nextMirrorSet = parseInt (mirrorSet, 10) + 1;
     fs.writeFileSync (path.join (indexesDir, 'set.txt'), String (nextMirrorSet), 'utf8');
     console.error (`-> Set next mirror set to: ${nextMirrorSet}`);
-  } // if size limit exceeded
+  }
+
+  console.error('--> Processing summary:');
+  console.error(`    - ${newItemsProcessed} new items processed.`);
+  console.error(`    - ${itemsRegenerated} items regenerated.`);
+  console.error(`    - ${itemsSkippedUpToDate} items skipped (up-to-date).`);
+  console.error(`    - ${itemsSkippedIntentional} items skipped (not applicable).`);
+  console.error(`    - ${itemsFailed} items failed.`);
+  console.error(`    - ${currentIndex} out of ${itemsToProcess.length} total items checked.`);
 
   return existingObjectsVersions;
 } // processMirrorSet
@@ -378,6 +387,69 @@ async function generateLicensesFile(allItems, processedItemIds) {
   console.error(`--> Licenses file generated at ${licensesFile} with ${sortedLicenses.length} entries.`);
 } // generateLicensesFile
 
+async function generatePartialIndexes(listData, indexesDir) {
+  console.error('--> Generating partial indexes...');
+  const { items, groups } = listData;
+
+  const partialsData = {};
+
+  for (const group of Object.values(groups)) {
+    if (!group.region_refs || !group.value || !group.features) {
+      continue;
+    }
+
+    const validItemIds = group.region_refs
+      .filter(ref => items[ref] && items[ref].features);
+
+    if (validItemIds.length === 0) {
+      continue;
+    }
+
+    const valueHexParts = [...group.value].map(c => c.codePointAt(0).toString(16));
+    const featuresParts = group.features.split('.');
+    const allParts = [...valueHexParts, ...featuresParts];
+    const representativeId = `:u-swk-${allParts.join('-')}`;
+
+    const partIndex = Math.floor(group.value.codePointAt(0) / 16);
+
+    if (!partialsData[partIndex]) {
+      partialsData[partIndex] = { images: {} };
+    }
+    
+    if (partialsData[partIndex].images[representativeId]) {
+       console.warn(`--> Duplicate representativeId found: ${representativeId}. Merging item lists.`);
+       partialsData[partIndex].images[representativeId].push(...validItemIds);
+    } else {
+       partialsData[partIndex].images[representativeId] = validItemIds;
+    }
+  }
+
+  const partialsDir = path.join(indexesDir, 'imageindex');
+  try {
+    fs.mkdirSync(partialsDir, { recursive: true });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+
+  let filesWritten = 0;
+  for (const [partIndex, data] of Object.entries(partialsData)) {
+    const filename = `part-${partIndex}.json`;
+    const filePath = path.join(partialsDir, filename);
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+      filesWritten++;
+    } catch (e) {
+      console.error(`--> Failed to write partial index file ${filePath}: ${e.message}`);
+    }
+  }
+
+  if (filesWritten > 0) {
+    console.error(`--> Successfully generated ${filesWritten} partial index files in ${partialsDir}.`);
+  } else {
+    console.error('--> No partial index files were generated.');
+  }
+} // generatePartialIndexes
+
 async function main () {
   const mirrorSet = process.argv[2];
   if (!mirrorSet || !/^[0-9]+$/.test (mirrorSet)) {
@@ -388,9 +460,10 @@ async function main () {
   try {
     fs.mkdirSync (indexesDir, { recursive: true });
     fs.mkdirSync (objectsDir, { recursive: true });
-    const allItems = await fetchIdentifierItems ();
-    const processedItems = await processMirrorSet (mirrorSet, allItems);
-    await generateLicensesFile(allItems, processedItems.keys());
+    const listData = await fetchListData();
+    const processedItems = await processMirrorSet (mirrorSet, listData.items);
+    await generateLicensesFile(listData.items, processedItems.keys());
+    await generatePartialIndexes(listData, indexesDir);
     console.error (`-> Batch process for mirror set ${mirrorSet} completed successfully.`);
   } catch (error) {
     console.error (`FATAL: ${error.message}`);
