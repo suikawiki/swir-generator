@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 ## This script orchestrates the entire swir batch process.
 ## It receives configuration via standard command-line options.
 

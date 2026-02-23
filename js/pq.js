@@ -43,7 +43,7 @@ export const PQ = {env: {}};
     let p = new Path2D ('M' + this._pts.join (' '));
 
     if (opts.matrix) {
-      let q = new Path2D;
+      let q = new Path2D ();
       q.addPath (p, opts.matrix);
       p = q;
     }
@@ -55,7 +55,7 @@ export const PQ = {env: {}};
   PQ.RegionBoundary = function () {};
 
   PQ.RegionBoundary.fromArray = function (array) {
-    let rb = new PQ.RegionBoundary;
+    let rb = new PQ.RegionBoundary ();
     rb.array = array;
     rb.boundingBox = PQ.RegionBoundary._getBoundingBox (array);
     return rb;
@@ -64,7 +64,7 @@ export const PQ = {env: {}};
   PQ.RegionBoundary._getBoundingBox = rb => {
     let xx = [];
     let yy = [];
-    let bb = new PQ.BoundingBox;
+    let bb = new PQ.BoundingBox ();
     rb.forEach (paths => bb.addPoints (paths[0]));
     return bb;
   }; // PQ.RegionBoundary._getBoundingBox
@@ -72,7 +72,7 @@ export const PQ = {env: {}};
   PQ.RegionBoundary.prototype.getRegionKey = async function () {
     let json = JSON.stringify (this.array);
     if (json === "[]") return null;
-    let data = (new TextEncoder).encode (json);
+    let data = (new TextEncoder ()).encode (json);
     let buffer = await crypto.subtle.digest ("SHA-256", data);
     return Array.from (new Uint8Array (buffer)).slice (0, 5).map (b => b.toString (16).padStart (2, '0')).join ('');
   }; // getRegionKey
@@ -83,7 +83,7 @@ PQ.Image = function () {
 };
 
 PQ.Image.fromImg = function (img, {orientation = 1}) {
-  let self = new PQ.Image;
+  let self = new PQ.Image ();
   self.orientation = orientation;
   self._img = img;
   self.physicalWidth = img.naturalWidth;
@@ -92,7 +92,7 @@ PQ.Image.fromImg = function (img, {orientation = 1}) {
 }; // PQ.Image.fromImg
 
 PQ.Image.fromImageData = function (imageData, {orientation = 1}) {
-  let self = new PQ.Image;
+  let self = new PQ.Image ();
   self.orientation = orientation;
   self._imageData = imageData;
   self.physicalWidth = imageData.width;
@@ -203,8 +203,8 @@ PQ.Image.prototype.getClippedCanvasByRegionBoundary = function (rb) {
       ctx.beginPath ();
       ctx.moveTo (path[0][0] - bb.minX, path[0][1] - bb.minY);
       path.forEach (([x, y], j) => ctx.lineTo (x - bb.minX, y - bb.minY));
-      ctx.closePath();
-      ctx.fill();
+      ctx.closePath ();
+      ctx.fill ();
       ctx.globalCompositeOperation = 'destination-out';
     });
 
@@ -217,13 +217,13 @@ PQ.Image.prototype.getClippedCanvasByRegionBoundary = function (rb) {
   return destCtx;
 }; // PQ.Image.prototype.getClippedCanvasByRegionBoundary
 
-PQ.Image._insertXMPIntoJPEG = function(jpegInput, xmpXmlString) {
-    function concatUint8Arrays(...arrays) {
-        const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
-        const result = new Uint8Array(totalLength);
+PQ.Image._insertXMPIntoJPEG = function (jpegInput, xmpXmlString) {
+    function concatUint8Arrays (...arrays) {
+        const totalLength = arrays.reduce ((sum, arr) => sum + arr.length, 0);
+        const result = new Uint8Array (totalLength);
         let offset = 0;
         for (const arr of arrays) {
-          result.set(arr, offset);
+          result.set (arr, offset);
           offset += arr.length;
         }
         return result;
@@ -233,57 +233,57 @@ PQ.Image._insertXMPIntoJPEG = function(jpegInput, xmpXmlString) {
     if (jpegInput instanceof Uint8Array) {
       jpeg = jpegInput;
     } else if (jpegInput instanceof ArrayBuffer) {
-      jpeg = new Uint8Array(jpegInput);
+      jpeg = new Uint8Array (jpegInput);
     } else if (typeof Buffer !== "undefined" && jpegInput instanceof Buffer) {
-      jpeg = new Uint8Array(jpegInput);
+      jpeg = new Uint8Array (jpegInput);
     } else {
-      throw new Error("Unsupported input type");
+      throw new Error ("Unsupported input type");
     }
   
     if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) {
-      throw new Error("Not a valid JPEG (missing SOI)");
+      throw new Error ("Not a valid JPEG (missing SOI)");
     }
   
-    const encoder = new TextEncoder();
-    const xmpHeader = encoder.encode("http://ns.adobe.com/xap/1.0/\0");
-    const xmpBody = encoder.encode(xmpXmlString);
+    const encoder = new TextEncoder ();
+    const xmpHeader = encoder.encode ("http://ns.adobe.com/xap/1.0/\0");
+    const xmpBody = encoder.encode (xmpXmlString);
   
-    const xmpPayload = concatUint8Arrays(xmpHeader, xmpBody);
+    const xmpPayload = concatUint8Arrays (xmpHeader, xmpBody);
   
-    const app1Marker = new Uint8Array([0xff, 0xe1]);
+    const app1Marker = new Uint8Array ([0xff, 0xe1]);
   
     const length = xmpPayload.length + 2;
-    const lengthBytes = new Uint8Array(2);
+    const lengthBytes = new Uint8Array (2);
     lengthBytes[0] = (length >> 8) & 0xff;
     lengthBytes[1] = length & 0xff;
   
-    const app1Segment = concatUint8Arrays(
+    const app1Segment = concatUint8Arrays (
       app1Marker,
       lengthBytes,
       xmpPayload
     );
   
-    return concatUint8Arrays(
-      jpeg.slice(0, 2),
+    return concatUint8Arrays (
+      jpeg.slice (0, 2),
       app1Segment,
-      jpeg.slice(2)
+      jpeg.slice (2)
     );
-}
+}; // PQ.Image._insertXMPIntoJPEG
 
-PQ.Image._insertXMPIntoPNG = function(pngInput, xmpXmlString) {
-    function concatUint8Arrays(...arrays) {
-        const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
-        const result = new Uint8Array(totalLength);
+PQ.Image._insertXMPIntoPNG = function (pngInput, xmpXmlString) {
+    function concatUint8Arrays (...arrays) {
+        const totalLength = arrays.reduce ((sum, arr) => sum + arr.length, 0);
+        const result = new Uint8Array (totalLength);
         let offset = 0;
         for (const arr of arrays) {
-          result.set(arr, offset);
+          result.set (arr, offset);
           offset += arr.length;
         }
         return result;
     }
 
     const crcTable = (() => {
-        const table = new Uint32Array(256);
+        const table = new Uint32Array (256);
         for (let i = 0; i < 256; i++) {
           let c = i;
           for (let k = 0; k < 8; k++) {
@@ -294,7 +294,7 @@ PQ.Image._insertXMPIntoPNG = function(pngInput, xmpXmlString) {
         return table;
     })();
       
-    function crc32(data) {
+    function crc32 (data) {
         let crc = 0xffffffff;
         for (let i = 0; i < data.length; i++) {
           crc = crcTable[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
@@ -306,34 +306,34 @@ PQ.Image._insertXMPIntoPNG = function(pngInput, xmpXmlString) {
     if (pngInput instanceof Uint8Array) {
       png = pngInput;
     } else if (pngInput instanceof ArrayBuffer) {
-      png = new Uint8Array(pngInput);
+      png = new Uint8Array (pngInput);
     } else if (typeof Buffer !== "undefined" && pngInput instanceof Buffer) {
-      png = new Uint8Array(pngInput);
+      png = new Uint8Array (pngInput);
     } else {
-      throw new Error("Unsupported input type");
+      throw new Error ("Unsupported input type");
     }
   
     const pngSignature = [137,80,78,71,13,10,26,10];
     for (let i = 0; i < 8; i++) {
       if (png[i] !== pngSignature[i]) {
-        throw new Error("Not a valid PNG");
+        throw new Error ("Not a valid PNG");
       }
     }
   
-    const encoder = new TextEncoder();
+    const encoder = new TextEncoder ();
   
-    const keyword = encoder.encode("XML:com.adobe.xmp");
-    const nullByte = new Uint8Array([0]);
+    const keyword = encoder.encode ("XML:com.adobe.xmp");
+    const nullByte = new Uint8Array ([0]);
   
-    const compressionFlag = new Uint8Array([0]);
-    const compressionMethod = new Uint8Array([0]);
+    const compressionFlag = new Uint8Array ([0]);
+    const compressionMethod = new Uint8Array ([0]);
   
     const languageTag = nullByte;
     const translatedKeyword = nullByte;
   
-    const textData = encoder.encode(xmpXmlString);
+    const textData = encoder.encode (xmpXmlString);
   
-    const iTXtData = concatUint8Arrays(
+    const iTXtData = concatUint8Arrays (
       keyword,
       nullByte,
       compressionFlag,
@@ -344,19 +344,19 @@ PQ.Image._insertXMPIntoPNG = function(pngInput, xmpXmlString) {
     );
   
     const createChunk = (type, data) => {
-      const typeBytes = encoder.encode(type);
+      const typeBytes = encoder.encode (type);
       const length = data.length;
-      const chunk = new Uint8Array(4 + 4 + length + 4);
+      const chunk = new Uint8Array (4 + 4 + length + 4);
 
       chunk[0] = (length >>> 24) & 0xff;
       chunk[1] = (length >>> 16) & 0xff;
       chunk[2] = (length >>> 8) & 0xff;
       chunk[3] = length & 0xff;
     
-      chunk.set(typeBytes, 4);
-      chunk.set(data, 8);
+      chunk.set (typeBytes, 4);
+      chunk.set (data, 8);
     
-      const crc = crc32(concatUint8Arrays(typeBytes, data));
+      const crc = crc32 (concatUint8Arrays (typeBytes, data));
       const crcOffset = 8 + length;
     
       chunk[crcOffset]     = (crc >>> 24) & 0xff;
@@ -367,20 +367,20 @@ PQ.Image._insertXMPIntoPNG = function(pngInput, xmpXmlString) {
       return chunk;
     }
   
-    const iTXtChunk = createChunk("iTXt", iTXtData);
+    const iTXtChunk = createChunk ("iTXt", iTXtData);
     const ihdrEnd = 33;
   
-    return concatUint8Arrays(
-      png.slice(0, ihdrEnd),
+    return concatUint8Arrays (
+      png.slice (0, ihdrEnd),
       iTXtChunk,
-      png.slice(ihdrEnd)
+      png.slice (ihdrEnd)
     );
-}
+}; // PQ.Image._insertXMPIntoPNG
 
 PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png", allowMissingLegalKey = false } = {}) {
   info = info || {};
   if (!allowMissingLegalKey && !info.legalKey) {
-    throw new Error("legalKey is required unless allowMissingLegalKey is set to true.");
+    throw new Error ("legalKey is required unless allowMissingLegalKey is set to true.");
   }
 
   const inputBuffer = canvas.toBuffer (type);
@@ -415,7 +415,7 @@ PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png", a
     if (url) {
       xmpParts.push (`<cc:license rdf:resource="${escapeXml (url)}"/>`);
     }
-    xmpParts.push (`<dl:key>${escapeXml (info.legalKey)}</dl:key>`);
+    xmpParts.push (`<dl:key rdf:datatype="data:,ddsd.legalKey">${escapeXml (info.legalKey)}</dl:key>`);
     dlTagNames.push ('dl:key');
   }
 
@@ -491,12 +491,12 @@ PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png", a
 `<?xpacket end="w"?>`;
 
   if (type === "image/jpeg") {
-    return PQ.Image._insertXMPIntoJPEG(inputBuffer, xmp);
+    return PQ.Image._insertXMPIntoJPEG (inputBuffer, xmp);
   } else if (type === "image/png") {
-    return PQ.Image._insertXMPIntoPNG(inputBuffer, xmp);
+    return PQ.Image._insertXMPIntoPNG (inputBuffer, xmp);
   }
 
-  return inputBuffer;
+  throw new Error (`Unsupported image type for XMP embedding: ${type}`);
 }; // PQ.Image.SerializeCanvas
 
 
