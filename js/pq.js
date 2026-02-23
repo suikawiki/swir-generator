@@ -218,7 +218,11 @@ PQ.Image.prototype.getClippedCanvasByRegionBoundary = function (rb) {
 }; // PQ.Image.prototype.getClippedCanvasByRegionBoundary
 
 
-PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png" } = {}) {
+PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png", allowMissingLegalKey = false } = {}) {
+  info = info || {};
+  if (!allowMissingLegalKey && !info.legalKey) {
+    throw new Error("legalKey is required unless allowMissingLegalKey is set to true.");
+  }
 
   const sharp = (await import('sharp')).default;
 
