@@ -301,6 +301,10 @@ PQ.Image.SerializeCanvas = async function (canvas, info, { type = "image/png" } 
     xmpParts.push (`<dl:writingMode rdf:datatype="data:,ddsd.writingMode">${escapeXml (info.legalWritingMode)}</dl:writingMode>`);
     dlTagNames.push ('dl:writingMode');
   }
+  if (info.legalModified) {
+    xmpParts.push (`<dl:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</dl:modified>`);
+    dlTagNames.push ('dl:modified');
+  }
 
   if (dlTagNames.length > 0) {
     const dlTagsString = dlTagNames.join (', ') + ' を参照。';

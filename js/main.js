@@ -6,7 +6,7 @@ import { createCanvas, loadImage } from "canvas";
 import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
-const IMPLEMENTATION_VERSION = 2;
+const IMPLEMENTATION_VERSION = 3;
 const isDebug = process.env.DEBUG === 'true';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -142,7 +142,8 @@ async function processSingleItem (id, item) {
   
   try {
     const image = await dataSource.getClippedImageCanvas (parsed, { useCache: true });
-    const buffer = await PQ.Image.SerializeCanvas(image, parsed.imageSource, { type: 'image/jpeg' });
+    const imageSourceWithLegalModified = { ...parsed.imageSource, legalModified: true };
+    const buffer = await PQ.Image.SerializeCanvas(image, imageSourceWithLegalModified, { type: 'image/jpeg' });
     const objectFile = getObjectPath (id);
     return { buffer, objectFile };
   } catch (e) {
@@ -368,7 +369,8 @@ async function generateLicensesFile(allItems, processedItemIds) {
   for (const id of processedItemIds) {
     const item = allItems[id];
     if (item && item.image_source) {
-      const legalInfo = Object.entries(item.image_source)
+      const imageSourceWithLegalModified = { ...item.image_source, legalModified: true };
+      const legalInfo = Object.entries(imageSourceWithLegalModified)
         .filter(([key]) => key.startsWith('legal'))
         .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
         .map(([key, value]) => `${key}: ${value}`)
@@ -398,8 +400,7 @@ async function generatePartialIndexes(listData, indexesDir) {
       continue;
     }
 
-    const validItemIds = group.region_refs
-      .filter(ref => items[ref] && items[ref].features);
+    const validItemIds = group.region_refs.filter(ref => items[ref]);
 
     if (validItemIds.length === 0) {
       continue;
@@ -488,8 +489,8 @@ WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 Affero General Public License for more details.
 
-You should have received a copy of the GNU Affero General Public
-License along with this program.  If not, see
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see
 <https://www.gnu.org/licenses/>.
 
 */

@@ -455,7 +455,8 @@ import { PQ } from './pq.js';
             let m = meta["タイトル / 著者"]?.match (/^<a[^<>]+>.+? \/ ([^<>&]+)<\/a>$/);
             if (m) author = m[1]; // kulib
           }
-          let date2 = meta["Publication Date (W3CDTF format)"]; // NDL
+          let date2 = meta["Publication Date (W3CDTF fortmat)"] // NDL
+              || meta["Publication Date (W3CDTF format)"];
           let date1 = meta["Publication Date"] // NDL
           if (!date1 && meta.Date) {
             if (imageAccess.hasLegal === 'kokusho') {
