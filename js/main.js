@@ -6,7 +6,7 @@ import { createCanvas, loadImage } from "canvas";
 import { PQ } from './pq.js';
 import * as AIS from './ais.js';
 
-const IMPLEMENTATION_VERSION = 6;
+const IMPLEMENTATION_VERSION = 7;
 const isDebug = process.env.DEBUG === 'true';
 
 const sleep = (ms) => new Promise (resolve => setTimeout (resolve, ms));
@@ -52,12 +52,12 @@ function getObjectPath (id) {
 
   if (match && match[1].length <= 100 && match[2].length <= 100) {
     const [, group1, group2] = match;
-    return path.join (objectsDir, group1, `${group2}.jpeg`);
+    return path.join (objectsDir, group1, `${group2}.png`);
   } // if epRegex
 
   const hash = crypto.createHash ('sha1').update (id).digest ('hex');
   const dir = `sha-${hash.substring (0, 2)}`;
-  const filename = `${hash.substring (2)}.jpeg`;
+  const filename = `${hash.substring (2)}.png`;
   return path.join (objectsDir, dir, filename);
 } // getObjectPath
 
@@ -143,7 +143,7 @@ async function processSingleItem (id, item) {
   try {
     const image = await dataSource.getClippedImageCanvas (parsed, { useCache: true });
     const imageSourceWithLegalModified = { ...parsed.imageSource, legalModified: true };
-    const buffer = await PQ.Image.SerializeCanvas (image, imageSourceWithLegalModified, { type: 'image/jpeg' });
+    const buffer = await PQ.Image.SerializeCanvas (image, imageSourceWithLegalModified, { type: 'image/png' });
     const objectFile = getObjectPath (id);
     return { buffer, objectFile };
   } catch (e) {
