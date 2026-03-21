@@ -204,6 +204,62 @@ import { PQ } from './pq.js';
           }
           break;
         }
+
+        if (inputEPType === 'kyuudai') {
+          let m = inputEP.match (/^([0-9]+)-([0-9]+)-([0-9]+)(?:-([0-9a-z]+)|)$/);
+          if (m) {
+            imageAccess.pageNumber = parseInt (m[3]);
+            imageSource.key = `kyuudai-${m[1]}-${m[2]}-${imageAccess.pageNumber}`;
+            imageSource.pageURL = `https://catalog.lib.kyushu-u.ac.jp/opac_detail_md/?lang=0&amode=MD${m[1]}&bibid=${m[2]}`;
+            imageSource.iiifURL = `https://catalog.lib.kyushu-u.ac.jp/image/manifest/1/${m[1]}/${m[2]}.json`;
+            imageRegion.regionKey ??= m[4]; // or undefined
+          }
+          break;
+        } else if (inputURL.hostname === 'catalog.lib.kyushu-u.ac.jp') {
+          // https://catalog.lib.kyushu-u.ac.jp/opac_detail_md/?lang=0&amode=MD820&bibid=1906473
+          // https://catalog.lib.kyushu-u.ac.jp/image/manifest/1/820/1906473.json
+          let md = inputURL.searchParams?.get ('amode')?.match (/^MD([0-9]+)$/);
+          let id = inputURL.searchParams?.get ('bibid')?.match (/^([0-9]+)$/);
+          let page = inputURL.hash.match (/^#page=([0-9]+)$/);
+          if (md && id) {
+            imageAccess.pageNumber = parseInt (page ? page[1] : 1);
+            imageSource.key = `kyuudai-${md[1]}-${id[1]}-${imageAccess.pageNumber}`;
+            imageSource.pageURL = `https://catalog.lib.kyushu-u.ac.jp/opac_detail_md/?lang=0&amode=MD${md[1]}&bibid=${id[1]}`;
+            imageSource.iiifURL = `https://catalog.lib.kyushu-u.ac.jp/image/manifest/1/${md[1]}/${id[1]}.json`;
+          }
+          break;
+        }
+
+        if (inputEPType === 'fukuokapreflib') {
+          let m = inputEP.match (/^([a-z0-9]+-[0-9]+)-([A-Za-z_0-9]+)-([0-9]+)(?:-([0-9a-z]+)|)$/);
+          if (m) {
+            imageAccess.pageNumber = parseInt (m[3]);
+            imageSource.key = `fukuokapreflib-${m[1]}-${m[2]}-${imageAccess.pageNumber}`;
+            imageSource.pageURL = `https://adeac.jp/fukuoka-pref-lib/iiif/${m[1]}/${m[2]}/uv`;
+            imageSource.iiifURL = `https://adeac.jp/viewitem/fukuoka-pref-lib/viewer/iiif/${m[2]}/manifest.json`;
+            imageRegion.regionKey ??= m[4]; // or undefined
+            imageAccess.hasLegal = 'fukuokapreflib';
+          }
+          break;
+        } else if (inputURL.hostname === 'adeac.jp') {
+          // https://adeac.jp/fukuoka-pref-lib/iiif/mp010020-100010/NIPPON_02/uv#?cv=0&c=0&m=0&s=0&r=0&xywh=-819%2C-1%2C2440%2C1000
+          // https://adeac.jp/fukuoka-pref-lib/catalog/mp010020-100010
+          // https://adeac.jp/viewitem/fukuoka-pref-lib/viewer/iiif/NIPPON_02/manifest.json
+          //
+          // https://adeac.jp/fukuoka-pref-lib/iiif/mp040670-100040/oota528a/uv
+          // https://adeac.jp/viewitem/fukuoka-pref-lib/viewer/iiif/oota528a/manifest.json
+          // https://adeac.jp/fukuoka-pref-lib/catalog/mp040670-100040
+          let m = inputURL.pathname.match (/^\/fukuoka-pref-lib\/iiif\/([a-z0-9]+-[0-9]+)\/([A-Za-z_0-9]+)/);
+          let page = parseInt (new URLSearchParams (inputURL.hash.replace (/^#/, '').replace (/^\?/, '')).get ('cv') || 0) + 1;
+          if (m) {
+            imageAccess.pageNumber = page;
+            imageSource.key = `fukuokapreflib-${m[1]}-${m[2]}-${imageAccess.pageNumber}`;
+            imageSource.pageURL = `https://adeac.jp/fukuoka-pref-lib/iiif/${m[1]}/${m[2]}/uv`;
+            imageSource.iiifURL = `https://adeac.jp/viewitem/fukuoka-pref-lib/viewer/iiif/${m[2]}/manifest.json`;
+            imageAccess.hasLegal = 'fukuokapreflib';
+          }
+          break;
+        }
         
         if (inputEPType === 'iwtkhk') {
           let m = inputEP.match (/^([0-9]+)(?:-([0-9a-z]+)|)$/);
@@ -216,7 +272,7 @@ import { PQ } from './pq.js';
           break;
         } else if (inputURL.hostname === 'jmapps.ne.jp') {
           // input = 'https://jmapps.ne.jp/iwtkhk/det.html?data_id=' + m[2];
-          let m = inputURL.pathname.match (/\/iwtkhk\/det\.html\?data_id=([0-9]+)/);
+          let m = (inputURL.pathname + inputURL.search).match (/\/iwtkhk\/det\.html\?data_id=([0-9]+)/);
           if (m) {
             imageSource.key = `iwtkhk-${m[1]}`;
             imageSource.pageURL = `https://jmapps.ne.jp/iwtkhk/det.html?data_id=${m[1]}`;
@@ -268,6 +324,16 @@ import { PQ } from './pq.js';
             imageAccess.isInternal = true;
           }
           break;
+        } else if (inputURL.href?.startsWith (this.config.internal2_url_prefix)) {
+          let path = inputURL.href.substring (this.config.internal2_url_prefix.length);
+          let m = path.match (/^books\/([a-zA-Z0-9_.\/-]+)$/);
+          if (m) {
+            let e = m[1].replace (/_/g, '_5F').replace (/\./g, '_2E').replace (/\//g, '_2F').replace (/^x/, '_78');
+            imageSource.key = 'books-' + e;
+            imageAccess.imageURL = this.config.internal_url_prefix + path;
+            imageAccess.isInternal = true;
+          }
+          break;
         }
 
         if (inputEPType === 'image') {
@@ -308,7 +374,7 @@ import { PQ } from './pq.js';
           let m = inputURL.hash.match (/^#page=([0-9]+)\b/);
           if (m) imageAccess.pageNumber = parseInt (m[1]);
           imageSource.pageURL = inputURL.href.replace (/#.*$/, '');
-          imageSource.key = 'unknown-' + inputURL.href.replace (/([^A-Za-wyz0-9])/g, (_, c) => '_' + c.codePointAt (0).toString (16).toUpperCase ());
+          imageSource.key = 'unknown-' + imageSource.pageURL.replace (/([^A-Za-wyz0-9])/g, (_, c) => '_' + c.codePointAt (0).toString (16).toUpperCase ());
           imageAccess.needTypeCheck = true;
           break;
         }
@@ -335,9 +401,8 @@ import { PQ } from './pq.js';
     async resolveImageSource ({imageSource, imageAccess}) {
       if (imageAccess.useOGImage &&
           !(imageAccess.imageURL || imageSource.imageURL)) {
-        let fURL = this.config.image_proxy_url_prefix + imageSource.pageURL;
-        await fetch (fURL, {mode: 'cors'}).then (res => {
-          if (res.status !== 200) throw res;
+        let fURL = "" + imageSource.pageURL;
+        await PQ.env.getImageResponse (fURL, {}).then (res => {
           return res.text ();
         }).then (text => {
           let doc = PQ.env.parseHTML (text);
@@ -353,9 +418,8 @@ import { PQ } from './pq.js';
 
       if (imageAccess.needTypeCheck &&
           !(imageAccess.imageURL || imageSource.imageURL)) {
-        let fURL = this.config.image_proxy_url_prefix + imageSource.pageURL;
-        await fetch (fURL, {mode: 'cors'}).then (res => {
-          if (res.status !== 200) throw res;
+        let fURL = "" + imageSource.pageURL;
+        await PQ.env.getImageResponse (fURL, {}).then (res => {
           if (res.headers.get ('content-type')?.match (/^(?:image\/vnd\.djvu|image\/x.djvu|image\/x-djvu|image\/djvu)\b/)) {
             imageAccess.pageNumber = imageSource.pageNumber ??= imageAccess.pageNumber ?? 1;
             imageAccess.imageURL = imageSource.pageURL;
@@ -364,7 +428,8 @@ import { PQ } from './pq.js';
           } else if (res.headers.get ('content-type')?.match (/^image\//)) {
             imageSource.imageURL = imageSource.pageURL;
             imageSource.key = imageSource.key.replace (/^unknown-/, 'image-');
-          } else if (res.headers.get ('content-type')?.match (/^application\/pdf\b/)) {
+          } else if (res.headers.get ('content-type')?.match (/^application\/pdf\b/) ||
+                     (res.headers.get ('content-type')?.match (/^application\/octet-stream\b/) && imageSource.pageURL?.match (/pdf/))) {
             imageSource.pageNumber ??= imageAccess.pageNumber ?? 1;
             imageAccess.imageURL = this.config.pdf_proxy_url_prefix + encodeURIComponent (imageSource.pageURL) + '/'+encodeURIComponent (imageSource.pageNumber)+'/image.png';
             imageSource.key = imageSource.key.replace (/^unknown-/, 'pdf-') + '-' + imageSource.pageNumber;
@@ -381,9 +446,8 @@ import { PQ } from './pq.js';
       let iiifJSON;
       if ((imageAccess.iiifURL || imageSource.iiifURL) &&
           !(imageAccess.imageURL || imageSource.imageURL)) {
-        let fURL = this.config.image_proxy_url_prefix + (imageAccess.iiifURL || imageSource.iiifURL);
-        iiifJSON = await fetch (fURL, {mode: 'cors'}).then (res => {
-          if (res.status !== 200) throw res;
+        let fURL = "" + (imageAccess.iiifURL || imageSource.iiifURL);
+        iiifJSON = await PQ.env.getImageResponse (fURL, {}).then (res => {
           return res.json ();
         });
 
@@ -421,10 +485,9 @@ import { PQ } from './pq.js';
         }
       } else if ((imageAccess.iiifURL || imageSource.iiifURL) &&
                  !imageSource.legalKey) {
-        let fURL = this.config.image_proxy_url_prefix + (imageAccess.iiifURL || imageSource.iiifURL);
+        let fURL = "" + (imageAccess.iiifURL || imageSource.iiifURL);
         try {
-          iiifJSON = await fetch (fURL, {mode: 'cors'}).then (res => {
-            if (res.status !== 200) throw res;
+          iiifJSON = await PQ.env.getImageResponse (fURL, {}).then (res => {
             return res.json ();
           });
         } catch (e) { }
@@ -442,21 +505,31 @@ import { PQ } from './pq.js';
           label = iiifValue (label);
           value = iiifValue (value);
           meta[label[0]] = value[0];
-          lang ||= label[1] || value[1];
+          if (value[1] !== 'none') { // kyuudai
+            lang ||= value[1];
+          }
+          if (label[1] !== 'none') {
+            lang ||= label[1];
+          }
         }
 
         let credits = [];
         {
-          let title = meta.Title // NDL
-              || iiifValue (iiifJSON.label); // kulib
+          let title = meta.Title; // NDL
+          if (!title) {
+            let v =  iiifValue (iiifJSON.label); // kulib, kyuudai, fukuokapreflib
+            if (v) title = v[0];
+          }
           let author = meta.Author || // kokusho
+              meta["著者"] || // kyuudai
               meta.Creator || meta.Publisher; // NDL
           if (!author) {
             let m = meta["タイトル / 著者"]?.match (/^<a[^<>]+>.+? \/ ([^<>&]+)<\/a>$/);
             if (m) author = m[1]; // kulib
           }
-          let date2 = meta["Publication Date (W3CDTF fortmat)"] // NDL
-              || meta["Publication Date (W3CDTF format)"];
+          let date2 = meta["Publication Date (W3CDTF fortmat)"] || // NDL
+              meta["Publication Date (W3CDTF format)"] ||
+              meta["日付"]; // kyuudai
           let date1 = meta["Publication Date"] // NDL
           if (!date1 && meta.Date) {
             if (imageAccess.hasLegal === 'kokusho') {
@@ -487,7 +560,8 @@ import { PQ } from './pq.js';
         }
         if (iiifJSON.attribution) {
           if (imageAccess.hasLegal === 'kokusho' ||
-              imageAccess.hasLegal === 'ndl') {
+              imageAccess.hasLegal === 'ndl' ||
+              imageAccess.hasLegal === 'fukuokapreflib') {
             credits.push ('所蔵: ' + iiifJSON.attribution + "。");
           } else {
             credits.push (iiifJSON.attribution);
@@ -496,7 +570,11 @@ import { PQ } from './pq.js';
         let legalKey = {
           "https://creativecommons.org/publicdomain/mark/1.0/deed.ja": "CC-PDM-1.0", // kokusho
           "https://creativecommons.org/licenses/by-sa/4.0/deed.ja": "CC-BY-SA-4.0", // kokusho
+          "https://creativecommons.org/licenses/by-sa/4.0/deed.en": "CC-BY-SA-4.0",
+          "http://creativecommons.org/licenses/by-sa/4.0/": "CC-BY-SA-4.0",
+          //"http://creativecommons.org/licenses/by-sa/3.0/"
           "https://creativecommons.org/licenses/by/4.0/deed.ja": "CC-BY-4.0",
+          
           //"https://creativecommons.org/licenses/by-nd/4.0/deed.ja": (non-free) // kokusho
           //"https://kokusho.nijl.ac.jp/page/usage.html" : All-Rights-Reserved (non-free) // kokusho
         }[iiifJSON.license];
@@ -507,25 +585,35 @@ import { PQ } from './pq.js';
           let value = iiifJSON.requiredStatement?.value?.ja?.[0] || '';
           if (value.match (/^京都大学(附属図書館|吉田南総合図書館|法学部図書室|経済学研究科|経済学部図書室|理学部中央図書室|総合博物館)/)) {
             imageSource.legalKey = '-ddsd-kulib-free-normal';
-            credits.push (iiifJSON.requiredStatement?.label?.ja?.[0] + ': ' + value + ' <' + iiifJSON.rights + '>.');
           }
         } else if (imageAccess.hasLegal === 'ndl' &&
                    meta["Access Restrictions"] === "PDM") {
           imageSource.legalKey = '-ddsd-ndl-' + meta["Access Restrictions"];
+        } else if (meta["権利"] === "パブリックドメイン<br />Public Domain") {
+          // kyuudai
+          imageSource.legalKey = '-ddsd-kyuudai-PublicDomain';
         } else {
           if (meta["Access Restrictions"]) { // unknown value
             credits.push (meta["Access Restrictions"]); // NDL
           }
           imageSource.legalKey = '-ddsd-unknown';
         }
+        if (iiifJSON.requiredStatement) { // kyuudai, kulib
+          credits.push (iiifValue (iiifJSON.requiredStatement?.label)?.[0] + ': ' +
+                        iiifValue (iiifJSON.requiredStatement?.value)?.[0]);
+        }
+        if (iiifJSON.rights) { // kulib
+          credits.push ('<' + iiifJSON.rights + '>');
+        }
         imageSource.legalCredit = credits.join ("\n");
+        if (meta["テキストの言語コード"]) { // fukuokapreflib
+          imageSource.legalLang ||= {
+            jpn: "ja",
+          }[meta["テキストの言語コード"]];          
+        }
       } // iiifURL
       
       let fURL = (imageAccess.imageURL || imageSource.imageURL) + '';
-      if (!imageAccess.isInternal) {
-        fURL = this.config.image_proxy_url_prefix + fURL;
-      }
-
       let getImg;
       if (opts.useCache) {
         this._cache ??= new Map;
@@ -534,12 +622,15 @@ import { PQ } from './pq.js';
       }
       if (imageAccess.imageType === 'djvu') {
         if (!getImg) {
-          getImg = PQ.env.createImageDataByDjvuURL (fURL, imageAccess.pageNumber);
+          getImg = PQ.env.getImageResponse (fURL, {isInternal: imageAccess.isInternal}).then (res => {
+            return PQ.env.createImageDataByDjvuResponse
+                (res, imageAccess.pageNumber);
+          });
           getImg.method = 'fromImageData';
         }
       } else {
         if (!getImg) {
-          getImg = PQ.env.createImg (fURL);
+          getImg = PQ.env.getImageResponse (fURL, {isInternal: imageAccess.isInternal}).then (res => PQ.env.createImgByResponse (res));
           getImg.method = 'fromImg';
         }
       }
@@ -578,9 +669,13 @@ import { PQ } from './pq.js';
     getClippedImageProxyURL ({imageSource, imageAccess, imageRegion}) {
       let key = ':ep-x' + imageSource.transformKey + '-' + imageSource.key + '-' + imageRegion.regionKey;
       let u = this.config.clipped_image_proxy_url_prefix + 'imx/' + encodeURIComponent (key) + '/image';
-
       return u;
     } // getClippedImageProxyURL
+
+    getClippedImageRemoteURL ({imageSource, imageAccess, imageRegion}) {
+      let u = "https://chars.suikawiki.org/swdata-items-swir/x"+imageSource.transformKey + '-' + imageSource.key+"/"+imageRegion.regionKey+".png";
+      return u;
+    } // getClippedImageRemoteURL
 
   } // ImageDataSource
 
@@ -605,7 +700,11 @@ export class ClassicAnnotationStorage {
     }
 
     if (this.config.load_annotation_url_prefix) {
-      let u = this.config.load_annotation_url_prefix + 'annotation-' + imageSource.key + '--' + imageSource.transformKey + '.json';
+      let kkey = imageSource.key;
+      if (100 < kkey.length) {
+        kkey = await PQ.env.sha1Hex (kkey);
+      }
+      let u = this.config.load_annotation_url_prefix + 'annotation-' + kkey + '--' + imageSource.transformKey + '.json';
       let json = await fetch (u, {cache: 'reload'}).then (res => {
         if (res.status === 200) {
           return res.json ();
@@ -682,3 +781,23 @@ export class ClassicAnnotationStorage {
     return Promise.all (pp);
   } // putAnnotationData
 } // ClassicAnnotationStorage
+
+/*
+
+Copyright 2026 Wakaba <wakaba@suikawiki.org>.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public
+License along with this program.  If not, see
+<https://www.gnu.org/licenses/>.
+
+*/

@@ -212,7 +212,7 @@ async function processMirrorSet (mirrorSet, incomingItems) {
   let itemsSkippedIntentional = 0;
   let itemsFailed = 0;
 
-  console.error (`--> Checking ${itemsToProcess.length} total items...`);
+  console.error (`--> Checking ${itemsToProcess.length} total items (version: ${IMPLEMENTATION_VERSION})...`);
 
   while (currentIndex < itemsToProcess.length) {
     const [id, item] = itemsToProcess[currentIndex];

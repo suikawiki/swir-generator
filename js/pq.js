@@ -4,6 +4,25 @@ export const PQ = {env: {}};
 // PQ.env.createImg
 // PQ.env.parseHTML
 
+PQ.env.getImageResponse = async function (url, {isInternal}) {
+  //if (isInternal) ...
+  return fetch (url, {mode: 'cors'}).then (res => {
+    if (res.status !== 200) throw res;
+    return res;
+  });
+};
+
+PQ.env.sha1Hex = async function (input) { // Web / node
+  let data = (new TextEncoder ()).encode (input);
+  let buffer = await crypto.subtle.digest ("SHA-1", data);
+  return Array.from (new Uint8Array (buffer)).map (b => b.toString (16).padStart (2, '0')).join ('');
+};
+PQ.env.sha256Hex = async function (input) { // Web / node
+  let data = (new TextEncoder ()).encode (input);
+  let buffer = await crypto.subtle.digest ("SHA-256", data);
+  return Array.from (new Uint8Array (buffer)).map (b => b.toString (16).padStart (2, '0')).join ('');
+};
+
   PQ.BoundingBox = function () {
     this.minX = this.minY = +Infinity;
     this.maxX = this.maxY = -Infinity;
@@ -72,9 +91,7 @@ export const PQ = {env: {}};
   PQ.RegionBoundary.prototype.getRegionKey = async function () {
     let json = JSON.stringify (this.array);
     if (json === "[]") return null;
-    let data = (new TextEncoder ()).encode (json);
-    let buffer = await crypto.subtle.digest ("SHA-256", data);
-    return Array.from (new Uint8Array (buffer)).slice (0, 5).map (b => b.toString (16).padStart (2, '0')).join ('');
+    return ((await PQ.env.sha256Hex (json)).substring (0, 10));
   }; // getRegionKey
 
 
